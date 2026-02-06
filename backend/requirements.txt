@@ -1,0 +1,16 @@
+# FastAPI Backend Dependencies
+# Minimal dependencies for MVP
+
+fastapi>=0.109.0,<0.110.0
+uvicorn[standard]>=0.27.0,<0.28.0
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
+python-dateutil>=2.8.0,<3.0.0
+
+# Machine Learning - Ensemble Model
+# - Isolation Forest for anomaly detection
+# - XGBoost for supervised fraud classification
+# Note: Using versions compatible with Python 3.8+
+scikit-learn>=1.3.0,<1.4.0
+numpy>=1.24.0,<2.0.0
+xgboost>=2.0.0,<3.0.0
