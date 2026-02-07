@@ -379,7 +379,7 @@ FRAUD_PROBABILITY=0.15
 
 ## How to Run
 
-### Option 1: Run Both Services (Recommended)
+### Option 1: Local Development
 
 **Terminal 1 - Backend:**
 ```bash
@@ -395,29 +395,50 @@ pnpm dev
 # or: npm run dev
 ```
 
-### Option 2: Production Build
+### Option 2: Production Deployment
 
-**Backend:**
-```bash
-cd backend
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+#### Deploy Backend to Render
+
+1. Go to [render.com](https://render.com) and create a new **Web Service**
+2. Connect your GitHub repository
+3. Configure the service:
+   - **Root Directory**: `backend`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+4. Add environment variables in Render dashboard:
+   ```
+   FRONTEND_URL=https://your-app.vercel.app
+   DEBUG=false
+   ```
+5. Deploy and note your Render URL (e.g., `https://your-backend.onrender.com`)
+
+#### Deploy Frontend to Vercel
+
+1. Go to [vercel.com](https://vercel.com) and import your GitHub repository
+2. Configure the project:
+   - **Root Directory**: `frontend`
+   - **Framework Preset**: Next.js
+3. Add environment variable in Vercel dashboard:
+   ```
+   NEXT_PUBLIC_API_URL=https://your-backend.onrender.com
+   ```
+4. Deploy!
+
+#### Post-Deployment: Update CORS
+
+After deploying both services, update the Render environment variable:
 ```
-
-**Frontend:**
-```bash
-cd frontend
-pnpm build
-pnpm start
+FRONTEND_URL=https://your-actual-vercel-url.vercel.app
 ```
 
 ### Access the Application
 
-| Service | URL |
-|---------|-----|
-| **Frontend Dashboard** | http://localhost:3000 |
-| **Backend API** | http://localhost:8000 |
-| **API Documentation** | http://localhost:8000/docs |
-| **Health Check** | http://localhost:8000/api/health |
+| Environment | Frontend | Backend |
+|-------------|----------|---------|
+| **Local** | http://localhost:3000 | http://localhost:8000 |
+| **Production** | your-app.vercel.app | your-backend.onrender.com |
+| **API Docs** | - | /docs |
+| **Health Check** | - | /api/health |
 
 ---
 

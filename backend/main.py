@@ -147,9 +147,12 @@ def create_app() -> FastAPI:
     # -------------------------------------------------------------------------
     # CORS MIDDLEWARE (Strict - No wildcards)
     # -------------------------------------------------------------------------
+    allowed_origins = settings.get_allowed_origins()
+    logger.info(f"CORS allowed origins: {allowed_origins}")
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.ALLOWED_ORIGINS,  # Only http://localhost:3000
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST"],  # Only methods we use
         allow_headers=["Content-Type", "Accept"],  # Minimal headers

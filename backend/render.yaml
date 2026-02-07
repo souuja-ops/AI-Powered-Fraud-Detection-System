@@ -1,0 +1,9 @@
+# Render Build Configuration
+# This file tells Render how to build and start the backend
+
+# Build command - install dependencies
+build:
+  - pip install -r requirements.txt
+
+# Start command
+start: uvicorn main:app --host 0.0.0.0 --port $PORT
