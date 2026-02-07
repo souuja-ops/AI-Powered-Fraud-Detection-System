@@ -26,10 +26,11 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://ai-powered-fraud-detection-system.vercel.app",
     ]
     
     # Frontend URL (for CORS in production)
-    FRONTEND_URL: str = ""
+    FRONTEND_URL: str = "https://ai-powered-fraud-detection-system.vercel.app"
     
     # Rate Limiting (placeholder values)
     RATE_LIMIT_REQUESTS: int = 100
