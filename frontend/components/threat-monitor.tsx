@@ -45,6 +45,8 @@ interface ThreatMonitorProps {
   }>;
   alertCount: number;
   isConnected: boolean;
+  /** Average API latency in milliseconds (measured from real requests) */
+  avgLatency?: number;
 }
 
 // =============================================================================
@@ -285,7 +287,7 @@ function SystemMetrics({ tradesPerMinute, avgLatency }: { tradesPerMinute: numbe
 // MAIN COMPONENT
 // =============================================================================
 
-export function ThreatMonitor({ trades, alertCount, isConnected }: ThreatMonitorProps) {
+export function ThreatMonitor({ trades, alertCount, isConnected, avgLatency = 0 }: ThreatMonitorProps) {
   const [currentRiskScore, setCurrentRiskScore] = useState(0);
   const [threatLevel, setThreatLevel] = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL">("LOW");
   const [tradesPerMinute, setTradesPerMinute] = useState(0);
@@ -298,25 +300,43 @@ export function ThreatMonitor({ trades, alertCount, isConnected }: ThreatMonitor
       return;
     }
     
-    // Get average risk score of recent trades
-    const recentTrades = trades.slice(0, 10);
+    // Get average risk score of recent trades (use more for better sampling)
+    const recentTrades = trades.slice(0, 20);
     const avgScore = recentTrades.reduce((sum, t) => sum + t.risk_score, 0) / recentTrades.length;
     setCurrentRiskScore(Math.round(avgScore));
     
-    // Determine threat level based on alert count and average score
+    // Count risk levels in recent trades
     const highRiskCount = recentTrades.filter(t => t.risk_level === "HIGH").length;
-    if (highRiskCount >= 5 || avgScore >= 80) {
+    const mediumRiskCount = recentTrades.filter(t => t.risk_level === "MEDIUM").length;
+    const flaggedCount = highRiskCount + mediumRiskCount;
+    
+    // Determine threat level - CALIBRATED for realistic fraud rates (~1-5% flagged)
+    // With 20 recent trades:
+    // - CRITICAL: 3+ HIGH risk OR 5+ total flagged (unusual spike)
+    // - HIGH: 2+ HIGH risk OR 4+ total flagged 
+    // - MEDIUM: 1+ HIGH risk OR 2+ total flagged (some suspicious activity)
+    // - LOW: Normal operations (0-1 flagged trades is expected)
+    if (highRiskCount >= 3 || flaggedCount >= 5) {
       setThreatLevel("CRITICAL");
-    } else if (highRiskCount >= 3 || avgScore >= 60) {
+    } else if (highRiskCount >= 2 || flaggedCount >= 4) {
       setThreatLevel("HIGH");
-    } else if (highRiskCount >= 1 || avgScore >= 40) {
+    } else if (highRiskCount >= 1 || flaggedCount >= 2) {
       setThreatLevel("MEDIUM");
     } else {
       setThreatLevel("LOW");
     }
     
-    // Estimate trades per minute (simplified)
-    setTradesPerMinute(Math.round(trades.length / 5 * 60)); // Assuming 5 second polling
+    // Estimate trades per minute based on actual trade timestamps
+    if (trades.length >= 2) {
+      const newest = new Date(trades[0].timestamp).getTime();
+      const oldest = new Date(trades[Math.min(trades.length - 1, 19)].timestamp).getTime();
+      const timeSpanMs = Math.max(newest - oldest, 1000); // At least 1 second
+      const tradesInSpan = Math.min(trades.length, 20);
+      const tpm = Math.round((tradesInSpan / timeSpanMs) * 60000);
+      setTradesPerMinute(Math.min(tpm, 999)); // Cap at 999 for display
+    } else {
+      setTradesPerMinute(0);
+    }
   }, [trades, alertCount]);
   
   return (
@@ -355,8 +375,8 @@ export function ThreatMonitor({ trades, alertCount, isConnected }: ThreatMonitor
         {/* Live Stream */}
         <TransactionStream trades={trades} />
         
-        {/* System Metrics */}
-        <SystemMetrics tradesPerMinute={tradesPerMinute} avgLatency={23} />
+        {/* System Metrics - use real latency or fallback to estimate */}
+        <SystemMetrics tradesPerMinute={tradesPerMinute} avgLatency={avgLatency || 0} />
         
         {/* Footer */}
         <div className="flex items-center justify-between text-[10px] sm:text-xs text-muted-foreground pt-1.5 sm:pt-2 border-t border-border">

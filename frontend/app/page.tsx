@@ -199,6 +199,10 @@ export default function FraudDetectionDashboard() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [mlStatus, setMLStatus] = useState<MLStatus | null>(null)
   
+  // API performance tracking
+  const [avgLatency, setAvgLatency] = useState<number>(0)
+  const latencyHistoryRef = useRef<number[]>([])
+  
   // Refs for cleanup
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const healthIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -226,13 +230,18 @@ export default function FraudDetectionDashboard() {
     [trades, normalizedTradeIds]
   )
 
-  // Fetch data from backend
+  // Fetch data from backend with latency tracking
   const fetchData = useCallback(async () => {
+    const startTime = performance.now()
+    
     try {
       const [tradesData, alertsData] = await Promise.all([
         getTrades(),
         getAlerts(),
       ])
+      
+      // Calculate latency (only if we got real data)
+      const latency = Math.round(performance.now() - startTime)
 
       const hasRealData = tradesData.length > 0
 
@@ -242,18 +251,27 @@ export default function FraudDetectionDashboard() {
         setStats(computeStats(tradesData))
         setAnomalyData(computeAnomalyData(tradesData))
         setIsConnected(true)
+        
+        // Track latency with rolling average (last 10 requests)
+        latencyHistoryRef.current = [...latencyHistoryRef.current, latency].slice(-10)
+        const avgLat = Math.round(
+          latencyHistoryRef.current.reduce((a, b) => a + b, 0) / latencyHistoryRef.current.length
+        )
+        setAvgLatency(avgLat)
       } else {
         setTrades(mockTrades)
         setAlerts(mockAlerts)
         setStats(mockStats)
         setAnomalyData(mockAnomalyData)
         setIsConnected(false)
+        setAvgLatency(0) // Reset latency when using mock data
       }
 
       setLastUpdate(new Date())
     } catch (error) {
       console.error("[Dashboard] Error fetching data:", error)
       setIsConnected(false)
+      setAvgLatency(0) // Reset latency on error
     } finally {
       setIsLoading(false)
     }
@@ -514,6 +532,7 @@ export default function FraudDetectionDashboard() {
             trades={trades}
             alertCount={displayAlerts.length}
             isConnected={isConnected}
+            avgLatency={avgLatency}
           />
 
           {/* Recent Alerts */}
