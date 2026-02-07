@@ -36,9 +36,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS: int = 100
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     
-    # Risk Score Thresholds
-    HIGH_RISK_THRESHOLD: int = 70
-    MEDIUM_RISK_THRESHOLD: int = 40
+    # Risk Score Thresholds (calibrated for realistic fraud detection)
+    # With additive scoring, multiple mild signals can stack
+    # Raised thresholds to reduce false positives
+    HIGH_RISK_THRESHOLD: int = 80
+    MEDIUM_RISK_THRESHOLD: int = 50
     
     def get_allowed_origins(self) -> List[str]:
         """Get all allowed origins including FRONTEND_URL if set."""

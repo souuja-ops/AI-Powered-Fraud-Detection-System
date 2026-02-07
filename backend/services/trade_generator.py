@@ -46,12 +46,14 @@ class GeneratorConfig:
     # Memory limits
     MAX_TRADES_IN_MEMORY: int = 100          # Keep last N trades
     
-    # Anomaly injection frequency - MUCH LESS FREQUENT
+    # Anomaly injection frequency - REALISTIC FRAUD RATES
     # Real fraud is rare (0.1-1% of transactions)
-    ANOMALY_EVERY_N_TRADES: int = 50         # Inject anomaly every N trades
+    # With multi-trade anomalies (layering=10, structuring=4, velocity=8),
+    # we want effective rate of ~1-2%
+    ANOMALY_EVERY_N_TRADES: int = 150        # Inject anomaly every N trades
     
     # ADDITIONAL: Random chance to skip anomaly (makes it more realistic)
-    ANOMALY_SKIP_PROBABILITY: float = 0.3   # 30% chance to skip scheduled anomaly
+    ANOMALY_SKIP_PROBABILITY: float = 0.5   # 50% chance to skip scheduled anomaly
     
     # Normal trade parameters
     NORMAL_AMOUNT_MIN: float = 50.0          # Minimum normal trade amount

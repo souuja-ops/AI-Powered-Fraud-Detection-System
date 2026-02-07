@@ -93,30 +93,31 @@ _account_history: Dict[str, List[TradeRecord]] = {}
 
 # Configuration constants for fraud detection
 _CONFIG = {
-    # Amount thresholds (in USD)
-    "AMOUNT_LOW": 10_000,           # Below this = minimal risk
-    "AMOUNT_MEDIUM": 50_000,        # Above this = moderate risk
-    "AMOUNT_HIGH": 100_000,         # Above this = elevated risk
+    # Amount thresholds (in USD) - RAISED for realistic trading
+    # Most legitimate trades are under $25K, institutional can be $100K+
+    "AMOUNT_LOW": 25_000,           # Below this = minimal risk
+    "AMOUNT_MEDIUM": 75_000,        # Above this = moderate risk
+    "AMOUNT_HIGH": 150_000,         # Above this = elevated risk
     "AMOUNT_VERY_HIGH": 500_000,    # Above this = high risk
     
     # Velocity detection
     "VELOCITY_WINDOW_MINUTES": 10,  # Time window for burst detection
-    "VELOCITY_THRESHOLD": 3,        # Trades in window to trigger
+    "VELOCITY_THRESHOLD": 4,        # Trades in window to trigger (raised from 3)
     
     # Time-based detection (unusual hours in UTC)
     "UNUSUAL_HOUR_START": 1,        # 1 AM UTC
     "UNUSUAL_HOUR_END": 5,          # 5 AM UTC
     
     # Behavior drift
-    "MIN_HISTORY_FOR_DRIFT": 3,     # Minimum trades needed for drift detection
-    "DRIFT_MULTIPLIER": 3.0,        # Current amount / avg > this = anomaly
+    "MIN_HISTORY_FOR_DRIFT": 5,     # Minimum trades needed for drift detection (raised from 3)
+    "DRIFT_MULTIPLIER": 4.0,        # Current amount / avg > this = anomaly (raised from 3.0)
     
     # History limits
     "MAX_HISTORY_PER_ACCOUNT": 100, # Cap history to prevent memory bloat
     
     # ML Configuration
-    "ML_SIGNAL_MAX_SCORE": 25,      # Maximum points from ML signal (out of 100)
-    "ML_CONTAMINATION": 0.1,        # Expected proportion of anomalies
+    "ML_SIGNAL_MAX_SCORE": 20,      # Maximum points from ML signal (reduced from 25)
+    "ML_CONTAMINATION": 0.05,       # Expected proportion of anomalies (reduced from 0.1)
     "ML_N_ESTIMATORS": 100,         # Number of trees in forest
     "ML_RANDOM_STATE": 42,          # Fixed seed for deterministic results
     "ML_MIN_SAMPLES_TO_TRAIN": 20,  # Minimum samples before training
@@ -266,6 +267,9 @@ def _generate_synthetic_training_data(n_samples: int = 100) -> np.ndarray:
     Creates a mix of normal trades and anomalies to train the model
     before real trades are available.
     
+    Distribution: 90% normal, 7% moderate anomalies, 3% severe
+    (More realistic fraud ratios)
+    
     TODO for production:
     - Use historical data from database
     - Implement proper train/test split
@@ -278,37 +282,37 @@ def _generate_synthetic_training_data(n_samples: int = 100) -> np.ndarray:
     
     data = []
     
-    # 85% normal trades
-    n_normal = int(n_samples * 0.85)
+    # 90% normal trades (increased from 85%)
+    n_normal = int(n_samples * 0.90)
     for _ in range(n_normal):
         data.append([
-            np.random.uniform(100, 5000),        # amount: $100-$5000
+            np.random.uniform(100, 10000),       # amount: $100-$10K (typical range)
             np.random.randint(8, 18),            # hour: 8 AM - 6 PM
             0,                                    # not unusual hour
-            np.random.randint(0, 2),             # 0-1 trades in window
-            np.random.uniform(0.5, 1.5),         # close to average
+            np.random.randint(0, 3),             # 0-2 trades in window (normal)
+            np.random.uniform(0.7, 1.3),         # close to average (tight range)
         ])
     
-    # 10% moderate anomalies
-    n_moderate = int(n_samples * 0.10)
+    # 7% moderate anomalies (reduced from 10%)
+    n_moderate = int(n_samples * 0.07)
     for _ in range(n_moderate):
         data.append([
-            np.random.uniform(50000, 150000),    # amount: $50K-$150K
+            np.random.uniform(75000, 200000),    # amount: $75K-$200K
             np.random.randint(0, 24),            # any hour
             np.random.choice([0, 1]),            # maybe unusual
-            np.random.randint(2, 4),             # moderate velocity
-            np.random.uniform(2, 4),             # 2-4x average
+            np.random.randint(3, 5),             # moderate velocity
+            np.random.uniform(2.5, 5),           # 2.5-5x average
         ])
     
-    # 5% severe anomalies
+    # 3% severe anomalies (reduced from 5%)
     n_severe = n_samples - n_normal - n_moderate
     for _ in range(n_severe):
         data.append([
-            np.random.uniform(200000, 750000),   # amount: $200K-$750K
+            np.random.uniform(300000, 750000),   # amount: $300K-$750K
             np.random.randint(1, 5),             # unusual hours
             1,                                    # unusual hour
-            np.random.randint(4, 8),             # high velocity
-            np.random.uniform(5, 10),            # 5-10x average
+            np.random.randint(5, 10),            # high velocity
+            np.random.uniform(6, 12),            # 6-12x average
         ])
     
     return np.array(data, dtype=np.float64)
@@ -424,11 +428,11 @@ def _signal_amount_anomaly(trade: TradeRequest) -> SignalResult:
     Signal 1: Amount Anomaly Detection (Heuristic)
     
     Additive scoring (direct points added to risk score):
-    - Trades below $10K: 0 points (minimal risk)
-    - Trades $10K-$50K: 10 points (low risk)
-    - Trades $50K-$100K: 25 points (moderate risk)
-    - Trades $100K-$500K: 40 points (elevated risk)
-    - Trades above $500K: 55 points (high risk)
+    - Trades below $25K: 0 points (minimal risk - normal trading)
+    - Trades $25K-$75K: 5 points (low risk - larger but common)
+    - Trades $75K-$150K: 15 points (moderate risk)
+    - Trades $150K-$500K: 30 points (elevated risk)
+    - Trades above $500K: 45 points (high risk)
     """
     amount = trade.trade_amount
     
@@ -441,28 +445,28 @@ def _signal_amount_anomaly(trade: TradeRequest) -> SignalResult:
         
     elif amount < _CONFIG["AMOUNT_MEDIUM"]:
         return SignalResult(
-            score=10,
+            score=5,
             triggered=False,
             explanation=f"Trade amount ${amount:,.2f} is slightly elevated"
         )
         
     elif amount < _CONFIG["AMOUNT_HIGH"]:
         return SignalResult(
-            score=25,
+            score=15,
             triggered=True,
             explanation=f"Trade amount ${amount:,.2f} exceeds typical transaction size"
         )
         
     elif amount < _CONFIG["AMOUNT_VERY_HIGH"]:
         return SignalResult(
-            score=40,
+            score=30,
             triggered=True,
             explanation=f"Large trade amount ${amount:,.2f} requires attention"
         )
         
     else:
         return SignalResult(
-            score=55,
+            score=45,
             triggered=True,
             explanation=f"Very large trade amount ${amount:,.2f} significantly exceeds normal patterns"
         )
@@ -473,10 +477,10 @@ def _signal_velocity_burst(trade: TradeRequest, history: List[TradeRecord]) -> S
     Signal 2: Velocity Burst Detection (Heuristic)
     
     Additive scoring - detects rapid-fire trading patterns:
-    - 0-2 trades in window: 0 points
-    - 3 trades: 35 points
-    - 4 trades: 50 points  
-    - 5+ trades: 70 points (HIGH by itself)
+    - 0-3 trades in window: 0 points (normal activity)
+    - 4 trades: 25 points (elevated)
+    - 5 trades: 40 points (high)
+    - 6+ trades: 55 points (very high - likely automated)
     """
     if not history:
         return SignalResult(
@@ -508,21 +512,21 @@ def _signal_velocity_burst(trade: TradeRequest, history: List[TradeRecord]) -> S
         
     elif trades_in_window == threshold:
         return SignalResult(
-            score=35,
+            score=25,
             triggered=True,
             explanation=f"Elevated trading velocity: {trades_in_window} trades in {window_minutes}min window"
         )
         
     elif trades_in_window == threshold + 1:
         return SignalResult(
-            score=50,
+            score=40,
             triggered=True,
             explanation=f"High trading velocity: {trades_in_window} trades in {window_minutes}min window indicates possible layering"
         )
         
     else:
         return SignalResult(
-            score=70,
+            score=55,
             triggered=True,
             explanation=f"Extreme trading velocity: {trades_in_window} trades in {window_minutes}min window - potential automated fraud"
         )
@@ -532,9 +536,12 @@ def _signal_time_anomaly(trade: TradeRequest) -> SignalResult:
     """
     Signal 3: Time-based Anomaly Detection (Heuristic)
     
-    Additive scoring:
+    Additive scoring (reduced weight - timezone considerations):
     - Normal hours: 0 points
-    - Unusual hours (1-5 AM UTC): 20 points
+    - Unusual hours (1-5 AM UTC): 10 points (reduced from 20)
+    
+    Note: This is a weak signal alone since traders operate globally.
+    It becomes meaningful when combined with other risk factors.
     """
     current_time = _parse_timestamp(trade.timestamp)
     hour = current_time.hour
@@ -544,9 +551,9 @@ def _signal_time_anomaly(trade: TradeRequest) -> SignalResult:
     
     if unusual_start <= hour < unusual_end:
         return SignalResult(
-            score=20,
+            score=10,
             triggered=True,
-            explanation=f"Trade executed at unusual hour ({hour}:00 UTC) - outside normal trading window"
+            explanation=f"Trade executed at unusual hour ({hour}:00 UTC) - outside typical trading window"
         )
     
     return SignalResult(
@@ -562,19 +569,20 @@ def _signal_behavior_drift(trade: TradeRequest, history: List[TradeRecord]) -> S
     
     Additive scoring - compares to account's historical average:
     - Within 2x average: 0 points
-    - 2x-3x average: 15 points
-    - 3x-5x average: 30 points
-    - >5x average: 45 points
+    - 2x-4x average: 10 points
+    - 4x-6x average: 25 points
+    - >6x average: 40 points
     
-    Safe default: New accounts get 5 points (slight uncertainty).
+    New accounts (insufficient history) get 0 points - we don't penalize
+    accounts just for being new. Other signals handle new account risk.
     """
     min_history = _CONFIG["MIN_HISTORY_FOR_DRIFT"]
     
     if len(history) < min_history:
         return SignalResult(
-            score=5,
+            score=0,
             triggered=False,
-            explanation=f"New account with limited history ({len(history)} trades)"
+            explanation=f"Insufficient history for drift analysis ({len(history)} trades)"
         )
     
     # Calculate historical average amount
@@ -598,21 +606,21 @@ def _signal_behavior_drift(trade: TradeRequest, history: List[TradeRecord]) -> S
         
     elif drift_ratio <= drift_threshold:
         return SignalResult(
-            score=15,
+            score=10,
             triggered=True,
             explanation=f"Trade amount {drift_ratio:.1f}x higher than account average (${avg_amount:,.2f})"
         )
         
-    elif drift_ratio <= 5.0:
+    elif drift_ratio <= 6.0:
         return SignalResult(
-            score=30,
+            score=25,
             triggered=True,
             explanation=f"Significant deviation: trade is {drift_ratio:.1f}x the account average (${avg_amount:,.2f})"
         )
         
     else:
         return SignalResult(
-            score=45,
+            score=40,
             triggered=True,
             explanation=f"Extreme behavior drift: trade is {drift_ratio:.1f}x the account average (${avg_amount:,.2f}) - potential account takeover"
         )
@@ -629,9 +637,11 @@ def _signal_structuring(trade: TradeRequest, history: List[TradeRecord]) -> Sign
     - Multiple similar transactions from same account
     - Transfer type transactions
     
-    Scoring:
-    - Single transaction $9,000-$9,999: 15 points
-    - Multiple structuring transactions: 25-45 points
+    Scoring (only triggers on PATTERNS, not single transactions):
+    - Single transaction $9,000-$9,999: 0 points (could be legitimate)
+    - 2 structuring transactions: 20 points
+    - 3 structuring transactions: 35 points
+    - 4+ structuring transactions: 50 points (strong AML indicator)
     """
     STRUCTURING_MIN = 9000
     STRUCTURING_MAX = 9999
@@ -653,15 +663,22 @@ def _signal_structuring(trade: TradeRequest, history: List[TradeRecord]) -> Sign
             if STRUCTURING_MIN <= record.amount <= STRUCTURING_MAX:
                 structuring_count += 1
     
+    # Single transaction in range - not suspicious by itself
     if structuring_count == 1:
         return SignalResult(
-            score=15,
-            triggered=True,
-            explanation=f"Transaction amount ${amount:,.2f} is just under $10K reporting threshold"
+            score=0,
+            triggered=False,
+            explanation=f"Transaction amount ${amount:,.2f} noted (single occurrence)"
         )
-    elif structuring_count <= 3:
+    elif structuring_count == 2:
         return SignalResult(
-            score=30,
+            score=20,
+            triggered=True,
+            explanation=f"Two transactions ({structuring_count}) just under $10K threshold - monitoring for structuring"
+        )
+    elif structuring_count == 3:
+        return SignalResult(
+            score=35,
             triggered=True,
             explanation=f"Multiple transactions ({structuring_count}) just under $10K threshold - potential structuring/smurfing"
         )
@@ -684,9 +701,11 @@ def _signal_new_account_risk(trade: TradeRequest, history: List[TradeRecord]) ->
     - Large transaction amount for first trades
     - Transfer type on new account
     
-    Scoring:
-    - New account + small trade: 5 points
-    - New account + large trade: 25-40 points
+    Scoring (reduced - don't over-penalize legitimate new users):
+    - New account + small trade (<$10K): 0 points (normal onboarding)
+    - New account + medium trade ($10K-$50K): 10 points
+    - New account + large trade ($50K-$100K): 20 points
+    - New account + very large trade (>$100K): 35 points
     """
     is_new_account = len(history) < 5
     
@@ -699,35 +718,35 @@ def _signal_new_account_risk(trade: TradeRequest, history: List[TradeRecord]) ->
     
     amount = trade.trade_amount
     
-    # Small trade on new account - slight risk
-    if amount < 5000:
+    # Small trade on new account - completely normal
+    if amount < 10000:
         return SignalResult(
-            score=5,
+            score=0,
             triggered=False,
-            explanation=f"New account ({len(history)} trades), small transaction"
+            explanation=f"New account ({len(history)} trades), normal transaction size"
         )
     
-    # Medium trade on new account
-    if amount < 25000:
+    # Medium trade on new account - slight caution
+    if amount < 50000:
         return SignalResult(
-            score=15,
+            score=10,
             triggered=True,
             explanation=f"New account ({len(history)} trades) with elevated transaction ${amount:,.0f}"
         )
     
-    # Large trade on new account - high risk
+    # Large trade on new account - elevated risk
     if amount < 100000:
         return SignalResult(
-            score=30,
+            score=20,
             triggered=True,
-            explanation=f"New account ({len(history)} trades) with large transaction ${amount:,.0f} - potential new account fraud"
+            explanation=f"New account ({len(history)} trades) with large transaction ${amount:,.0f}"
         )
     
-    # Very large trade on new account - very high risk
+    # Very large trade on new account - high risk
     return SignalResult(
-        score=45,
+        score=35,
         triggered=True,
-        explanation=f"New account ({len(history)} trades) with very large transaction ${amount:,.0f} - high risk new account fraud indicator"
+        explanation=f"New account ({len(history)} trades) with very large transaction ${amount:,.0f} - potential new account fraud"
     )
 
 
