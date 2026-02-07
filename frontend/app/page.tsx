@@ -6,10 +6,11 @@
  * Real-time dashboard for monitoring trade anomalies and fraud detection.
  * 
  * DATA FLOW:
- * 1. On mount, fetches initial data from backend
- * 2. Sets up polling interval (every 5 seconds) for live updates
- * 3. Validates and transforms API responses for display
- * 4. Falls back to mock data if backend is unavailable
+ * 1. On mount, wakes up backend (handles Render cold starts)
+ * 2. Fetches initial data from backend
+ * 3. Sets up polling interval (every 5 seconds) for live updates
+ * 4. Validates and transforms API responses for display
+ * 5. Falls back to mock data if backend is unavailable
  * 
  * SECURITY NOTES:
  * - Frontend is READ-ONLY (does not submit trades)
@@ -17,7 +18,7 @@
  * - API errors are handled gracefully without exposing internals
  * - All data is validated before rendering
  * 
- * @version 2.0.0 - Live data integration
+ * @version 2.1.0 - Added connection status handling for Render cold starts
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
@@ -41,6 +42,7 @@ import { AlertsPanel } from "@/components/alerts-panel"
 import { TradesTable } from "@/components/trades-table"
 import { ThreatMonitor } from "@/components/threat-monitor"
 import { CompliancePanel } from "@/components/compliance-panel"
+import { ConnectionBanner } from "@/components/connection-status"
 
 // API client functions
 import { 
@@ -51,6 +53,7 @@ import {
   computeStats,
   computeAnomalyData,
   submitFeedback,
+  wakeUpBackend,
   type MLStatus,
 } from "@/lib/api"
 import { toast } from "sonner"
@@ -358,6 +361,9 @@ export default function FraudDetectionDashboard() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {/* Connection Banner - Shows when backend is waking up */}
+      <ConnectionBanner />
+      
       {/* Header - Responsive */}
       <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-3 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center justify-between max-w-[1800px] mx-auto">

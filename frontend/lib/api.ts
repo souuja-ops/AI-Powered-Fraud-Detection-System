@@ -7,6 +7,7 @@
  * - Type validation of responses
  * - Safe defaults for failed requests
  * - No exposure of internal logic or secrets
+ * - Automatic retry with exponential backoff for cold starts
  * 
  * SECURITY NOTES:
  * - API URL is configured via environment variable (NEXT_PUBLIC_API_URL)
@@ -14,7 +15,7 @@
  * - All responses are validated before use
  * - Frontend does NOT submit trades (read-only dashboard)
  * 
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 import type {
@@ -31,18 +32,30 @@ import type {
 
 /**
  * API base URL from environment variable
- * Falls back to localhost for development
+ * Falls back to production URL, then localhost for development
  * 
  * SECURITY: Using NEXT_PUBLIC_ prefix makes this available to client
  * This is safe because it's just the API endpoint URL, not a secret
  */
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = 
+  process.env.NEXT_PUBLIC_API_URL || 
+  "https://fraud-detection-api-8xaw.onrender.com";
 
 /**
  * Default fetch timeout in milliseconds
- * Prevents hung requests from blocking the UI
+ * Increased for Render cold starts (free tier can take 30-60s to wake)
  */
-const FETCH_TIMEOUT_MS = 30000; // Increased to 30 seconds for larger payloads
+const FETCH_TIMEOUT_MS = 60000; // 60 seconds for cold starts
+
+/**
+ * Retry configuration for handling Render cold starts
+ */
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 2000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2,
+};
 
 /**
  * API endpoints (centralized for maintainability)
@@ -56,6 +69,52 @@ const ENDPOINTS = {
   ML_FEATURE_IMPORTANCE: "/api/ml/feature-importance",
   ML_FEEDBACK: "/api/ml/feedback",
 } as const;
+
+// =============================================================================
+// CONNECTION STATE MANAGEMENT
+// =============================================================================
+
+/**
+ * Backend connection status
+ */
+export type ConnectionStatus = "connected" | "connecting" | "disconnected" | "waking";
+
+/**
+ * Connection state (module-level for persistence across calls)
+ */
+let connectionStatus: ConnectionStatus = "disconnected";
+let lastSuccessfulConnection: number = 0;
+let connectionListeners: ((status: ConnectionStatus) => void)[] = [];
+
+/**
+ * Subscribe to connection status changes
+ */
+export function onConnectionStatusChange(callback: (status: ConnectionStatus) => void): () => void {
+  connectionListeners.push(callback);
+  // Immediately call with current status
+  callback(connectionStatus);
+  // Return unsubscribe function
+  return () => {
+    connectionListeners = connectionListeners.filter(cb => cb !== callback);
+  };
+}
+
+/**
+ * Get current connection status
+ */
+export function getConnectionStatus(): ConnectionStatus {
+  return connectionStatus;
+}
+
+/**
+ * Update connection status and notify listeners
+ */
+function setConnectionStatus(status: ConnectionStatus): void {
+  if (connectionStatus !== status) {
+    connectionStatus = status;
+    connectionListeners.forEach(cb => cb(status));
+  }
+}
 
 // =============================================================================
 // TYPE GUARDS & VALIDATORS
@@ -128,6 +187,125 @@ function createTimeoutController(timeoutMs: number = FETCH_TIMEOUT_MS): {
 }
 
 /**
+ * Sleep for specified milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch with retry and exponential backoff
+ * Handles Render cold starts gracefully
+ */
+async function fetchWithRetry(
+  url: string, 
+  options: RequestInit,
+  retries: number = RETRY_CONFIG.maxRetries
+): Promise<Response> {
+  let lastError: Error | null = null;
+  let delay = RETRY_CONFIG.initialDelayMs;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 0) {
+        setConnectionStatus("waking");
+        await sleep(delay);
+        delay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelayMs);
+      }
+      
+      const response = await fetch(url, options);
+      
+      if (response.ok) {
+        setConnectionStatus("connected");
+        lastSuccessfulConnection = Date.now();
+        return response;
+      }
+      
+      // If server responded but with error, don't retry for client errors
+      if (response.status >= 400 && response.status < 500) {
+        return response;
+      }
+      
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // Don't retry on abort (timeout)
+      if (lastError.name === "AbortError" && attempt === retries) {
+        break;
+      }
+    }
+  }
+  
+  setConnectionStatus("disconnected");
+  throw lastError || new Error("Request failed after retries");
+}
+
+/**
+ * Wake up the backend (call health endpoint)
+ * Use this to pre-warm the backend when user loads the page
+ */
+export async function wakeUpBackend(): Promise<boolean> {
+  setConnectionStatus("waking");
+  
+  try {
+    const { controller, cleanup } = createTimeoutController(FETCH_TIMEOUT_MS);
+    
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}${ENDPOINTS.HEALTH}`,
+      {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        signal: controller.signal,
+      },
+      RETRY_CONFIG.maxRetries
+    );
+    
+    cleanup();
+    
+    if (response.ok) {
+      setConnectionStatus("connected");
+      return true;
+    }
+    
+    setConnectionStatus("disconnected");
+    return false;
+  } catch {
+    setConnectionStatus("disconnected");
+    return false;
+  }
+}
+
+/**
+ * Check if backend is currently reachable (quick check, no retries)
+ */
+export async function checkBackendHealth(): Promise<{ healthy: boolean; latencyMs: number }> {
+  const startTime = Date.now();
+  
+  try {
+    const { controller, cleanup } = createTimeoutController(10000); // 10s timeout for health check
+    
+    const response = await fetch(`${API_BASE_URL}${ENDPOINTS.HEALTH}`, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      signal: controller.signal,
+    });
+    
+    cleanup();
+    const latencyMs = Date.now() - startTime;
+    
+    if (response.ok) {
+      setConnectionStatus("connected");
+      return { healthy: true, latencyMs };
+    }
+    
+    return { healthy: false, latencyMs };
+  } catch {
+    return { healthy: false, latencyMs: Date.now() - startTime };
+  }
+}
+
+/**
  * Converts API TradeResponse to extended format for UI
  * 
  * NOTE: The backend returns minimal trade data. This function enriches it
@@ -170,7 +348,7 @@ function alertToUIFormat(alert: AlertResponse, index: number): AlertResponseUI {
  * Fetches all analyzed trades from the backend
  * 
  * Data Flow:
- * 1. Request sent to /api/trades
+ * 1. Request sent to /api/trades with retry logic
  * 2. Response validated for correct structure
  * 3. Each trade enriched with UI-specific fields
  * 4. Returns empty array on any error (safe default)
@@ -181,22 +359,28 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
   const { controller, cleanup } = createTimeoutController();
   
   try {
-    const response = await fetch(`${API_BASE_URL}${ENDPOINTS.TRADES}`, {
-      method: "GET",
-      headers: {
-        "Accept": "application/json",
-        // No auth headers - public read-only endpoint for demo
-      },
-      signal: controller.signal,
-      // Disable caching to get fresh data
-      cache: "no-store",
-    });
+    setConnectionStatus("connecting");
+    
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}${ENDPOINTS.TRADES}`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          // No auth headers - public read-only endpoint for demo
+        },
+        signal: controller.signal,
+        // Disable caching to get fresh data
+        cache: "no-store",
+      }
+    );
 
     cleanup(); // Clear timeout on successful response
 
     // Handle non-OK responses
     if (!response.ok) {
       console.error(`[API] getTrades failed: ${response.status} ${response.statusText}`);
+      setConnectionStatus("disconnected");
       return [];
     }
 
@@ -221,6 +405,7 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
       }
     }
 
+    setConnectionStatus("connected");
     return validTrades;
 
   } catch (error) {
@@ -235,6 +420,7 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
       }
     }
     
+    setConnectionStatus("disconnected");
     // Return empty array as safe default
     return [];
   }
@@ -244,7 +430,7 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
  * Fetches HIGH risk alerts from the backend
  * 
  * Data Flow:
- * 1. Request sent to /api/alerts
+ * 1. Request sent to /api/alerts with retry logic
  * 2. Response validated for correct structure
  * 3. Each alert converted to UI format
  * 4. Returns empty array on any error (safe default)
@@ -257,14 +443,17 @@ export async function getAlerts(): Promise<AlertResponseUI[]> {
   const { controller, cleanup } = createTimeoutController();
   
   try {
-    const response = await fetch(`${API_BASE_URL}${ENDPOINTS.ALERTS}`, {
-      method: "GET",
-      headers: {
-        "Accept": "application/json",
-      },
-      signal: controller.signal,
-      cache: "no-store",
-    });
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}${ENDPOINTS.ALERTS}`,
+      {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      }
+    );
 
     cleanup(); // Clear timeout on successful response
 
