@@ -76,15 +76,26 @@ const ENDPOINTS = {
 
 /**
  * Backend connection status
+ * - "connected": Backend is live and responding
+ * - "waking": Backend is cold and needs to wake up (show banner)
+ * - "disconnected": Cannot reach backend after retries
  */
-export type ConnectionStatus = "connected" | "connecting" | "disconnected" | "waking";
+export type ConnectionStatus = "connected" | "waking" | "disconnected";
 
 /**
  * Connection state (module-level for persistence across calls)
  */
-let connectionStatus: ConnectionStatus = "disconnected";
+let connectionStatus: ConnectionStatus = "connected"; // Assume connected initially (optimistic)
+let isBackendWarmed: boolean = false; // Track if we've confirmed backend is live
 let lastSuccessfulConnection: number = 0;
 let connectionListeners: ((status: ConnectionStatus) => void)[] = [];
+let initialWakeAttempted: boolean = false;
+
+/**
+ * Time threshold to consider backend as potentially cold (15 minutes)
+ * Render free tier spins down after ~15 min of inactivity
+ */
+const COLD_START_THRESHOLD_MS = 15 * 60 * 1000;
 
 /**
  * Subscribe to connection status changes
@@ -107,13 +118,39 @@ export function getConnectionStatus(): ConnectionStatus {
 }
 
 /**
+ * Check if backend is warmed up
+ */
+export function isBackendReady(): boolean {
+  return isBackendWarmed;
+}
+
+/**
  * Update connection status and notify listeners
+ * Only notify if status actually changed to prevent spam
  */
 function setConnectionStatus(status: ConnectionStatus): void {
   if (connectionStatus !== status) {
     connectionStatus = status;
     connectionListeners.forEach(cb => cb(status));
   }
+}
+
+/**
+ * Mark backend as warmed (called after first successful response)
+ */
+function markBackendWarmed(): void {
+  isBackendWarmed = true;
+  lastSuccessfulConnection = Date.now();
+  setConnectionStatus("connected");
+}
+
+/**
+ * Check if backend might be cold (no recent successful connection)
+ */
+function mightBeCold(): boolean {
+  if (!isBackendWarmed) return true;
+  const timeSinceLastConnection = Date.now() - lastSuccessfulConnection;
+  return timeSinceLastConnection > COLD_START_THRESHOLD_MS;
 }
 
 // =============================================================================
@@ -195,12 +232,14 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Fetch with retry and exponential backoff
- * Handles Render cold starts gracefully
+ * Only shows "waking" status if backend might be cold
+ * Silent retries if backend was recently active
  */
 async function fetchWithRetry(
   url: string, 
   options: RequestInit,
-  retries: number = RETRY_CONFIG.maxRetries
+  retries: number = RETRY_CONFIG.maxRetries,
+  showWakingStatus: boolean = false // Only show waking banner if explicitly requested
 ): Promise<Response> {
   let lastError: Error | null = null;
   let delay = RETRY_CONFIG.initialDelayMs;
@@ -208,7 +247,10 @@ async function fetchWithRetry(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       if (attempt > 0) {
-        setConnectionStatus("waking");
+        // Only show "waking" if this is a cold start situation
+        if (showWakingStatus && mightBeCold()) {
+          setConnectionStatus("waking");
+        }
         await sleep(delay);
         delay = Math.min(delay * RETRY_CONFIG.backoffMultiplier, RETRY_CONFIG.maxDelayMs);
       }
@@ -216,13 +258,13 @@ async function fetchWithRetry(
       const response = await fetch(url, options);
       
       if (response.ok) {
-        setConnectionStatus("connected");
-        lastSuccessfulConnection = Date.now();
+        markBackendWarmed();
         return response;
       }
       
       // If server responded but with error, don't retry for client errors
       if (response.status >= 400 && response.status < 500) {
+        markBackendWarmed(); // Server is live, just returned an error
         return response;
       }
       
@@ -243,10 +285,20 @@ async function fetchWithRetry(
 
 /**
  * Wake up the backend (call health endpoint)
- * Use this to pre-warm the backend when user loads the page
+ * Only shows waking banner on first load or if backend might be cold
  */
 export async function wakeUpBackend(): Promise<boolean> {
-  setConnectionStatus("waking");
+  // If already warmed and recently connected, skip the wake-up banner
+  if (isBackendWarmed && !mightBeCold()) {
+    return true;
+  }
+  
+  // Only show waking status if this is initial load or backend might be cold
+  if (!initialWakeAttempted || mightBeCold()) {
+    setConnectionStatus("waking");
+  }
+  
+  initialWakeAttempted = true;
   
   try {
     const { controller, cleanup } = createTimeoutController(FETCH_TIMEOUT_MS);
@@ -258,13 +310,14 @@ export async function wakeUpBackend(): Promise<boolean> {
         headers: { "Accept": "application/json" },
         signal: controller.signal,
       },
-      RETRY_CONFIG.maxRetries
+      RETRY_CONFIG.maxRetries,
+      true // Show waking status for health check
     );
     
     cleanup();
     
     if (response.ok) {
-      setConnectionStatus("connected");
+      markBackendWarmed();
       return true;
     }
     
@@ -278,6 +331,7 @@ export async function wakeUpBackend(): Promise<boolean> {
 
 /**
  * Check if backend is currently reachable (quick check, no retries)
+ * Silent check - doesn't update connection status unless disconnected
  */
 export async function checkBackendHealth(): Promise<{ healthy: boolean; latencyMs: number }> {
   const startTime = Date.now();
@@ -295,7 +349,7 @@ export async function checkBackendHealth(): Promise<{ healthy: boolean; latencyM
     const latencyMs = Date.now() - startTime;
     
     if (response.ok) {
-      setConnectionStatus("connected");
+      markBackendWarmed();
       return { healthy: true, latencyMs };
     }
     
@@ -348,7 +402,7 @@ function alertToUIFormat(alert: AlertResponse, index: number): AlertResponseUI {
  * Fetches all analyzed trades from the backend
  * 
  * Data Flow:
- * 1. Request sent to /api/trades with retry logic
+ * 1. Request sent to /api/trades with retry logic (silent if backend is warm)
  * 2. Response validated for correct structure
  * 3. Each trade enriched with UI-specific fields
  * 4. Returns empty array on any error (safe default)
@@ -359,7 +413,8 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
   const { controller, cleanup } = createTimeoutController();
   
   try {
-    setConnectionStatus("connecting");
+    // Don't show any status change for normal data fetches
+    // The waking banner only shows during initial wakeUpBackend() call
     
     const response = await fetchWithRetry(
       `${API_BASE_URL}${ENDPOINTS.TRADES}`,
@@ -372,7 +427,9 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
         signal: controller.signal,
         // Disable caching to get fresh data
         cache: "no-store",
-      }
+      },
+      RETRY_CONFIG.maxRetries,
+      false // Silent retries - don't show waking banner
     );
 
     cleanup(); // Clear timeout on successful response
@@ -380,7 +437,6 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
     // Handle non-OK responses
     if (!response.ok) {
       console.error(`[API] getTrades failed: ${response.status} ${response.statusText}`);
-      setConnectionStatus("disconnected");
       return [];
     }
 
@@ -405,7 +461,8 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
       }
     }
 
-    setConnectionStatus("connected");
+    // Success - backend is confirmed working (silent update)
+    markBackendWarmed();
     return validTrades;
 
   } catch (error) {
@@ -420,7 +477,10 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
       }
     }
     
-    setConnectionStatus("disconnected");
+    // Only show disconnected if we were previously connected
+    if (isBackendWarmed) {
+      setConnectionStatus("disconnected");
+    }
     // Return empty array as safe default
     return [];
   }
@@ -430,7 +490,7 @@ export async function getTrades(): Promise<TradeResponseExtended[]> {
  * Fetches HIGH risk alerts from the backend
  * 
  * Data Flow:
- * 1. Request sent to /api/alerts with retry logic
+ * 1. Request sent to /api/alerts with retry logic (silent)
  * 2. Response validated for correct structure
  * 3. Each alert converted to UI format
  * 4. Returns empty array on any error (safe default)
@@ -452,7 +512,9 @@ export async function getAlerts(): Promise<AlertResponseUI[]> {
         },
         signal: controller.signal,
         cache: "no-store",
-      }
+      },
+      RETRY_CONFIG.maxRetries,
+      false // Silent retries
     );
 
     cleanup(); // Clear timeout on successful response
@@ -481,6 +543,8 @@ export async function getAlerts(): Promise<AlertResponseUI[]> {
       }
     }
 
+    // Success - backend is working
+    markBackendWarmed();
     return validAlerts;
 
   } catch (error) {

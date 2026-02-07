@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Wifi, WifiOff, Loader2, AlertCircle } from "lucide-react";
+import { Wifi, WifiOff, Loader2 } from "lucide-react";
 import { 
   onConnectionStatusChange, 
   wakeUpBackend, 
@@ -9,22 +9,20 @@ import {
 } from "@/lib/api";
 
 /**
- * Connection Status Indicator
+ * Connection Status Indicator (Badge)
  * 
- * Shows the current connection status to the backend.
- * Handles Render cold starts gracefully with user feedback.
+ * Shows the current connection status to the backend as a small badge.
+ * Only shows "waking" during cold starts, otherwise connected/disconnected.
  */
 export function ConnectionStatus() {
-  const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  const [isWaking, setIsWaking] = useState(false);
+  const [status, setStatus] = useState<ConnectionStatus>("connected");
 
   useEffect(() => {
     // Subscribe to connection status changes
     const unsubscribe = onConnectionStatusChange(setStatus);
     
-    // Wake up backend on mount
-    setIsWaking(true);
-    wakeUpBackend().finally(() => setIsWaking(false));
+    // Wake up backend on mount (handles cold start detection internally)
+    wakeUpBackend();
     
     return unsubscribe;
   }, []);
@@ -38,15 +36,6 @@ export function ConnectionStatus() {
           color: "text-green-500",
           bgColor: "bg-green-500/10",
           borderColor: "border-green-500/20",
-        };
-      case "connecting":
-        return {
-          icon: Loader2,
-          text: "Connecting...",
-          color: "text-yellow-500",
-          bgColor: "bg-yellow-500/10",
-          borderColor: "border-yellow-500/20",
-          animate: true,
         };
       case "waking":
         return {
@@ -67,11 +56,11 @@ export function ConnectionStatus() {
         };
       default:
         return {
-          icon: AlertCircle,
-          text: "Unknown",
-          color: "text-gray-500",
-          bgColor: "bg-gray-500/10",
-          borderColor: "border-gray-500/20",
+          icon: Wifi,
+          text: "Connected",
+          color: "text-green-500",
+          bgColor: "bg-green-500/10",
+          borderColor: "border-green-500/20",
         };
     }
   };
@@ -101,28 +90,30 @@ export function ConnectionStatus() {
 /**
  * Connection Banner
  * 
- * Full-width banner shown when backend is waking up or disconnected.
- * Provides more context to the user.
+ * Full-width banner shown ONLY when backend is waking up from cold start.
+ * Does NOT show during normal data fetches.
  */
 export function ConnectionBanner() {
-  const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  const [showBanner, setShowBanner] = useState(true);
+  const [status, setStatus] = useState<ConnectionStatus>("connected");
+  const [showBanner, setShowBanner] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onConnectionStatusChange((newStatus) => {
       setStatus(newStatus);
-      // Auto-hide banner after connection
-      if (newStatus === "connected") {
-        setTimeout(() => setShowBanner(false), 2000);
-      } else {
+      // Only show banner for waking or disconnected
+      if (newStatus === "waking" || newStatus === "disconnected") {
         setShowBanner(true);
+      } else if (newStatus === "connected") {
+        // Hide banner after a short delay when connected
+        setTimeout(() => setShowBanner(false), 1500);
       }
     });
     
     return unsubscribe;
   }, []);
 
-  if (!showBanner || status === "connected") {
+  // Don't render anything if banner shouldn't show
+  if (!showBanner) {
     return null;
   }
 
@@ -134,17 +125,17 @@ export function ConnectionBanner() {
           description: "Free tier servers sleep after inactivity. This takes about 30 seconds.",
           color: "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400",
         };
-      case "connecting":
-        return {
-          title: "Connecting to backend...",
-          description: "Establishing connection to the fraud detection API.",
-          color: "bg-yellow-500/10 border-yellow-500/30 text-yellow-600 dark:text-yellow-400",
-        };
       case "disconnected":
         return {
           title: "Connection lost",
           description: "Unable to reach the backend. Data may be stale. Retrying...",
           color: "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400",
+        };
+      case "connected":
+        return {
+          title: "Connected!",
+          description: "Backend is ready.",
+          color: "bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400",
         };
       default:
         return null;
@@ -155,9 +146,13 @@ export function ConnectionBanner() {
   if (!message) return null;
 
   return (
-    <div className={`w-full px-4 py-3 border-b ${message.color}`}>
+    <div className={`w-full px-4 py-3 border-b ${message.color} transition-all duration-300`}>
       <div className="max-w-7xl mx-auto flex items-center gap-3">
-        <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+        {status !== "connected" ? (
+          <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+        ) : (
+          <Wifi className="h-4 w-4 flex-shrink-0" />
+        )}
         <div className="flex-1 min-w-0">
           <p className="font-medium text-sm">{message.title}</p>
           <p className="text-xs opacity-80">{message.description}</p>
