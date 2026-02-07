@@ -997,10 +997,11 @@ def get_all_trades() -> List[TradeResponse]:
 
 def get_alerts() -> List[AlertResponse]:
     """
-    Retrieve HIGH risk alerts only.
+    Retrieve alerts for suspicious trades (HIGH and MEDIUM risk).
     
     Returns:
-        List of AlertResponse for trades with HIGH risk level
+        List of AlertResponse for trades with HIGH or MEDIUM risk level.
+        HIGH risk alerts appear first, then MEDIUM, sorted by timestamp.
         
     TODO:
     - Add alert acknowledgment tracking
@@ -1009,6 +1010,18 @@ def get_alerts() -> List[AlertResponse]:
     """
     trades = get_all_trades()
     
+    # Include both HIGH and MEDIUM risk as alerts
+    suspicious_trades = [
+        trade for trade in trades
+        if trade.risk_level in (RiskLevel.HIGH, RiskLevel.MEDIUM)
+    ]
+    
+    # Sort by risk level (HIGH first) then by timestamp (newest first)
+    suspicious_trades.sort(
+        key=lambda t: (0 if t.risk_level == RiskLevel.HIGH else 1, t.timestamp),
+        reverse=True
+    )
+    
     alerts = [
         AlertResponse(
             trade_id=trade.trade_id,
@@ -1016,8 +1029,7 @@ def get_alerts() -> List[AlertResponse]:
             explanation=trade.explanation,
             timestamp=trade.timestamp
         )
-        for trade in trades
-        if trade.risk_level == RiskLevel.HIGH
+        for trade in suspicious_trades
     ]
     
     return alerts

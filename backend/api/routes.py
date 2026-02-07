@@ -159,26 +159,26 @@ async def get_trades_endpoint(request: Request) -> List[TradeResponse]:
     "/alerts",
     response_model=List[AlertResponse],
     status_code=status.HTTP_200_OK,
-    summary="Get high-risk alerts",
-    description="Retrieve alerts for trades flagged as HIGH risk.",
+    summary="Get suspicious trade alerts",
+    description="Retrieve alerts for trades flagged as HIGH or MEDIUM risk.",
     responses={
-        200: {"description": "List of high-risk alerts"},
+        200: {"description": "List of suspicious trade alerts"},
         429: {"description": "Rate limit exceeded"},
         500: {"model": ErrorResponse, "description": "Internal server error"},
     }
 )
 async def get_alerts_endpoint(request: Request) -> List[AlertResponse]:
     """
-    Retrieve HIGH risk alerts only.
+    Retrieve alerts for HIGH and MEDIUM risk trades.
     
-    Returns only trades where risk_level == HIGH.
+    Returns trades where risk_level is HIGH or MEDIUM, sorted by severity.
     """
     # Rate limit check (placeholder)
     _check_rate_limit(request)
     
     alerts = get_alerts()
     
-    logger.info(f"Retrieved {len(alerts)} high-risk alerts")
+    logger.info(f"Retrieved {len(alerts)} suspicious trade alerts")
     
     return alerts
 

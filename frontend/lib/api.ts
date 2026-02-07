@@ -376,19 +376,28 @@ function enrichTradeForUI(trade: TradeResponse): TradeResponseExtended {
     amount: Math.round(trade.risk_score * 1000 + Math.random() * 50000),
     // Default type based on alternating pattern
     type: parseInt(trade.trade_id.split("-")[1] || "0") % 2 === 0 ? "BUY" : "SELL",
-    // Status is determined by risk level
-    status: trade.risk_level === "HIGH" ? "Flagged" : "Normal",
+    // Status is determined by risk level - Flagged for HIGH or MEDIUM risk
+    status: (trade.risk_level === "HIGH" || trade.risk_level === "MEDIUM") ? "Flagged" : "Normal",
   };
 }
 
 /**
  * Converts API AlertResponse to UI format
+ * Determines risk level from score (matches backend thresholds)
  */
 function alertToUIFormat(alert: AlertResponse, index: number): AlertResponseUI {
+  // Determine risk level from score (HIGH >= 80, MEDIUM >= 50)
+  let risk_level: "HIGH" | "MEDIUM" | "LOW" = "LOW";
+  if (alert.risk_score >= 80) {
+    risk_level = "HIGH";
+  } else if (alert.risk_score >= 50) {
+    risk_level = "MEDIUM";
+  }
+  
   return {
     alert_id: `ALT-${String(index + 1).padStart(3, "0")}`,
     trade_id: alert.trade_id,
-    risk_level: "HIGH", // Alerts are always HIGH risk
+    risk_level,
     explanation: alert.explanation,
     timestamp: alert.timestamp,
   };
@@ -636,6 +645,10 @@ export async function getMLStatus(): Promise<MLStatus | null> {
 /**
  * Computes dashboard statistics from trades
  * This is calculated client-side from fetched data
+ * 
+ * Note: 
+ * - flagged_trades = HIGH + MEDIUM risk (require attention)
+ * - high_risk_alerts = HIGH risk only (critical alerts)
  */
 export function computeStats(trades: TradeResponseExtended[]) {
   if (trades.length === 0) {
@@ -647,8 +660,14 @@ export function computeStats(trades: TradeResponseExtended[]) {
     };
   }
 
-  const flaggedTrades = trades.filter((t) => t.status === "Flagged").length;
+  // Flagged = HIGH or MEDIUM risk trades (need review)
+  const flaggedTrades = trades.filter(
+    (t) => t.risk_level === "HIGH" || t.risk_level === "MEDIUM"
+  ).length;
+  
+  // High risk = only HIGH level trades (critical)
   const highRiskTrades = trades.filter((t) => t.risk_level === "HIGH").length;
+  
   const avgScore = trades.reduce((sum, t) => sum + t.risk_score, 0) / trades.length;
 
   return {
