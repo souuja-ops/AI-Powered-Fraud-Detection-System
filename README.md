@@ -7,6 +7,15 @@
 ![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+## 🚀 Live Demo
+
+| Component | URL |
+|-----------|-----|
+| **Dashboard** | [ai-powered-fraud-detection-system.vercel.app](https://ai-powered-fraud-detection-system.vercel.app) |
+| **API Docs** | [fraud-detection-api-8xaw.onrender.com/docs](https://fraud-detection-api-8xaw.onrender.com/docs) |
+
+> ⚠️ **Note**: Backend is hosted on Render free tier. First load may take 30-60 seconds to wake up.
+
 ---
 
 ## Table of Contents
@@ -315,13 +324,13 @@ class TradeRequest(BaseModel):
 
 - **Python** 3.8 or higher
 - **Node.js** 18 or higher
-- **pnpm** (recommended) or npm
+- **npm** or pnpm
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/fraud-detection.git
-cd fraud-detection
+git clone https://github.com/souuja-ops/AI-Powered-Fraud-Detection-System.git
+cd AI-Powered-Fraud-Detection-System
 ```
 
 ### 2. Backend Setup
