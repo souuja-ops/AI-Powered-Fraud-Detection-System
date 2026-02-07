@@ -175,6 +175,11 @@ function isValidTradeResponse(obj: unknown): obj is TradeResponse {
   
   return (
     typeof trade.trade_id === "string" &&
+    typeof trade.account_id === "string" &&
+    typeof trade.trade_amount === "number" &&
+    trade.trade_amount > 0 &&
+    typeof trade.trade_type === "string" &&
+    (trade.trade_type === "BUY" || trade.trade_type === "SELL" || trade.trade_type === "TRANSFER") &&
     typeof trade.risk_score === "number" &&
     trade.risk_score >= 0 &&
     trade.risk_score <= 100 &&
@@ -362,20 +367,15 @@ export async function checkBackendHealth(): Promise<{ healthy: boolean; latencyM
 /**
  * Converts API TradeResponse to extended format for UI
  * 
- * NOTE: The backend returns minimal trade data. This function enriches it
- * with UI-specific fields derived from the response.
+ * Maps backend field names to UI field names and adds computed fields.
+ * Now uses real data from backend instead of fabricated values.
  */
 function enrichTradeForUI(trade: TradeResponse): TradeResponseExtended {
   return {
     ...trade,
-    // Extract account_id from trade_id pattern or use placeholder
-    // Backend trades use format "TRD-00001" - we generate a corresponding account
-    account_id: `ACC-${trade.trade_id.split("-")[1] || "0000"}`,
-    // Amount is derived from anomaly context (not returned by API)
-    // Using risk_score as a proxy for demo purposes
-    amount: Math.round(trade.risk_score * 1000 + Math.random() * 50000),
-    // Default type based on alternating pattern
-    type: parseInt(trade.trade_id.split("-")[1] || "0") % 2 === 0 ? "BUY" : "SELL",
+    // Map backend field names to UI field names
+    amount: trade.trade_amount,
+    type: trade.trade_type,
     // Status is determined by risk level - Flagged for HIGH or MEDIUM risk
     status: (trade.risk_level === "HIGH" || trade.risk_level === "MEDIUM") ? "Flagged" : "Normal",
   };

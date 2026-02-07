@@ -114,6 +114,9 @@ class TradeResponse(BaseModel):
     
     Contract fields:
     - trade_id: string
+    - account_id: string
+    - trade_amount: float
+    - trade_type: BUY | SELL | TRANSFER
     - risk_score: integer (0-100)
     - risk_level: LOW | MEDIUM | HIGH
     - anomaly_score: float
@@ -124,6 +127,22 @@ class TradeResponse(BaseModel):
     trade_id: str = Field(
         ...,
         description="Unique trade identifier"
+    )
+    
+    account_id: str = Field(
+        ...,
+        description="Account identifier"
+    )
+    
+    trade_amount: float = Field(
+        ...,
+        gt=0,
+        description="Trade amount in USD"
+    )
+    
+    trade_type: TradeType = Field(
+        ...,
+        description="Type of trade operation"
     )
     
     risk_score: int = Field(
@@ -159,6 +178,9 @@ class TradeResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "trade_id": "TRD-001",
+                "account_id": "ACC-7821",
+                "trade_amount": 125000.00,
+                "trade_type": "BUY",
                 "risk_score": 85,
                 "risk_level": "HIGH",
                 "anomaly_score": 0.85,

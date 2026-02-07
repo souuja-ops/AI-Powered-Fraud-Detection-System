@@ -50,6 +50,9 @@ export interface TradeRequest {
  * @example
  * {
  *   trade_id: "TRD-001",
+ *   account_id: "ACC-7821",
+ *   trade_amount: 125000.00,
+ *   trade_type: "BUY",
  *   risk_score: 85,
  *   risk_level: "HIGH",
  *   anomaly_score: 0.92,
@@ -60,6 +63,12 @@ export interface TradeRequest {
 export interface TradeResponse {
   /** Unique trade identifier */
   trade_id: string;
+  /** Account identifier */
+  account_id: string;
+  /** Trade amount in USD */
+  trade_amount: number;
+  /** Type of trade operation */
+  trade_type: TradeType;
   /** Risk score from 0 to 100 */
   risk_score: number;
   /** Categorized risk level */
@@ -119,15 +128,15 @@ export interface AlertResponseUI {
 // =============================================================================
 
 /**
- * Extended trade response with additional UI fields
+ * Extended trade response with UI-specific fields
  * Used for display purposes in the dashboard
+ * 
+ * Inherits real data from TradeResponse, adds computed UI fields
  */
 export interface TradeResponseExtended extends TradeResponse {
-  /** Account identifier for display */
-  account_id: string;
-  /** Trade amount in USD */
+  /** Trade amount for display (mapped from trade_amount) */
   amount: number;
-  /** Type of trade */
+  /** Trade type for display (mapped from trade_type) */
   type: TradeType;
   /** Trade status for UI display */
   status: "Normal" | "Flagged";

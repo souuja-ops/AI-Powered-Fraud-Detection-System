@@ -946,9 +946,12 @@ def analyze_trade(trade: TradeRequest) -> TradeResponse:
     risk_score, anomaly_score, explanation = _aggregate_signals(heuristic_signals, ml_signal)
     risk_level = _calculate_risk_level(risk_score)
     
-    # Step 5: Build response
+    # Step 5: Build response with full trade details
     response = TradeResponse(
         trade_id=trade.trade_id,
+        account_id=trade.account_id,
+        trade_amount=trade.trade_amount,
+        trade_type=trade.trade_type,
         risk_score=risk_score,
         risk_level=risk_level,
         anomaly_score=anomaly_score,
@@ -1104,9 +1107,14 @@ def _get_mock_trades() -> List[TradeResponse]:
     
     TODO: Remove when database is connected
     """
+    from schemas import TradeType
+    
     return [
         TradeResponse(
             trade_id="TRD-001",
+            account_id="ACC-7821",
+            trade_amount=125000.00,
+            trade_type=TradeType.BUY,
             risk_score=85,
             risk_level=RiskLevel.HIGH,
             anomaly_score=0.85,
@@ -1115,6 +1123,9 @@ def _get_mock_trades() -> List[TradeResponse]:
         ),
         TradeResponse(
             trade_id="TRD-002",
+            account_id="ACC-4523",
+            trade_amount=2500.00,
+            trade_type=TradeType.SELL,
             risk_score=23,
             risk_level=RiskLevel.LOW,
             anomaly_score=0.23,
@@ -1123,6 +1134,9 @@ def _get_mock_trades() -> List[TradeResponse]:
         ),
         TradeResponse(
             trade_id="TRD-003",
+            account_id="ACC-9012",
+            trade_amount=450000.00,
+            trade_type=TradeType.TRANSFER,
             risk_score=92,
             risk_level=RiskLevel.HIGH,
             anomaly_score=0.92,
@@ -1131,6 +1145,9 @@ def _get_mock_trades() -> List[TradeResponse]:
         ),
         TradeResponse(
             trade_id="TRD-004",
+            account_id="ACC-3344",
+            trade_amount=1200.00,
+            trade_type=TradeType.BUY,
             risk_score=15,
             risk_level=RiskLevel.LOW,
             anomaly_score=0.15,
@@ -1139,6 +1156,9 @@ def _get_mock_trades() -> List[TradeResponse]:
         ),
         TradeResponse(
             trade_id="TRD-005",
+            account_id="ACC-5566",
+            trade_amount=35000.00,
+            trade_type=TradeType.SELL,
             risk_score=45,
             risk_level=RiskLevel.MEDIUM,
             anomaly_score=0.45,
@@ -1147,6 +1167,9 @@ def _get_mock_trades() -> List[TradeResponse]:
         ),
         TradeResponse(
             trade_id="TRD-006",
+            account_id="ACC-2211",
+            trade_amount=89000.00,
+            trade_type=TradeType.BUY,
             risk_score=78,
             risk_level=RiskLevel.HIGH,
             anomaly_score=0.78,
@@ -1155,6 +1178,9 @@ def _get_mock_trades() -> List[TradeResponse]:
         ),
         TradeResponse(
             trade_id="TRD-007",
+            account_id="ACC-8899",
+            trade_amount=800.00,
+            trade_type=TradeType.SELL,
             risk_score=12,
             risk_level=RiskLevel.LOW,
             anomaly_score=0.12,
@@ -1163,6 +1189,9 @@ def _get_mock_trades() -> List[TradeResponse]:
         ),
         TradeResponse(
             trade_id="TRD-008",
+            account_id="ACC-1122",
+            trade_amount=275000.00,
+            trade_type=TradeType.TRANSFER,
             risk_score=88,
             risk_level=RiskLevel.HIGH,
             anomaly_score=0.88,
